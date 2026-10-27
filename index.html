@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pace">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#e9edf1">
+<title>Pace</title>
+<style>
+:root{--bg:#e9edf1;--card:#fff;--ink:#0e2233;--mute:#5c6f80;--line:#cfd8e0;--ok:#0a7a4b;--bad:#c2261f;--acc:#0e2233;--accInk:#fff;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#0c1620;--card:#15232f;--ink:#eaf1f6;--mute:#8fa3b3;--line:#27394a;--ok:#4cd694;--bad:#ff7a70;--acc:#eaf1f6;--accInk:#0c1620;color-scheme:dark}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.35 -apple-system,system-ui,"Helvetica Neue",Arial,sans-serif;font-variant-numeric:tabular-nums;
+ padding:env(safe-area-inset-top,0px) 16px env(safe-area-inset-bottom,0px);user-select:none;-webkit-user-select:none;touch-action:manipulation}
+#app{min-height:100%;display:flex;flex-direction:column;gap:12px;padding:12px 0;max-width:520px;margin:0 auto}
+h1{font-size:26px;margin:4px 0 0;letter-spacing:-.01em}
+header{display:flex;justify-content:space-between;align-items:center;color:var(--mute);font-size:18px}
+.big{font-size:72px;font-weight:700;text-align:center;letter-spacing:-.03em;line-height:1}
+.chip{align-self:center;font-size:28px;font-weight:700;padding:8px 22px;border-radius:999px;background:var(--card);border:2px solid var(--line)}
+.chip.ok{color:var(--ok);border-color:var(--ok)}.chip.bad{color:var(--bad);border-color:var(--bad)}
+.mute{color:var(--mute);text-align:center}
+.sm{display:block;font-size:16px;font-weight:500;opacity:.8;letter-spacing:0}
+button{font:inherit;font-weight:600;color:var(--ink);background:var(--card);border:2px solid var(--line);border-radius:16px;min-height:56px;padding:0 14px}
+button:active{transform:scale(.98)}
+.go{background:var(--acc);color:var(--accInk);border:0;font-size:32px;letter-spacing:.02em;min-height:min(24dvh,200px);flex:1}
+.go.s{min-height:64px;flex:none;font-size:22px}
+.lg{min-height:76px;font-size:34px;background:var(--acc);color:var(--accInk);border:0}
+.red{background:#c2261f;color:#fff;border:0;min-height:76px;font-size:24px;letter-spacing:.04em}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.row{display:flex;gap:10px}.row>button{flex:1}
+.lnk{background:none;border:0;min-height:44px;color:var(--mute);font-weight:500}
+label{display:block;color:var(--mute);font-size:15px}
+input,select{display:block;width:100%;margin-top:6px;font:inherit;font-size:22px;color:var(--ink);background:var(--card);border:2px solid var(--line);border-radius:14px;padding:12px;user-select:text;-webkit-user-select:text}
+dialog{width:min(92vw,420px);border:0;border-radius:20px;background:var(--bg);color:var(--ink);padding:18px;display:none}
+dialog[open]{display:flex;flex-direction:column;gap:14px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.sum{background:var(--card);border-radius:16px;padding:6px 14px}
+.sum div{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)}.sum div:last-child{border:0}
+.sum span:first-child{color:var(--mute)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<dialog id="dlg"></dialog>
+<script>
+const K='pace.v1',HK='pace.hist';
+const $=s=>document.querySelector(s);
+const pad=n=>String(n).padStart(2,'0');
+const hm=ms=>{const d=new Date(ms);return pad(d.getHours())+':'+pad(d.getMinutes())};
+const mmss=ms=>{const s=Math.max(0,Math.floor(ms/1000));return pad(Math.floor(s/60))+':'+pad(s%60)};
+const mins=m=>pad(Math.floor(m/60))+':'+pad(m%60);
+const toMin=v=>{const p=(v||'18:00').split(':');return +p[0]*60+ +p[1]};
+const norm=s=>typeof s==='number'?{t:s,loc:'',g:null}:s;
+const def=()=>({ph:'setup',route:'',total:150,pk:250,ret:1080,start:0,g:null,stops:[],brk:[],res:[],doneAt:0,retAt:0,endAt:0});
+let S;try{S=Object.assign(def(),JSON.parse(localStorage.getItem(K)));S.stops=S.stops.map(norm)}catch(e){S=def()}
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const hist=()=>{try{return JSON.parse(localStorage.getItem(HK))||[]}catch(e){return[]}};
+
+// ---- GPS: keep a live fix, stamp it on every event ----
+let pos=null,gw=null;
+function geo(){
+  if(!navigator.geolocation||gw!==null)return;
+  gw=navigator.geolocation.watchPosition(
+    p=>{pos={lat:+p.coords.latitude.toFixed(6),lon:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy),t:Date.now()}},
+    ()=>{pos=null},{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+}
+const fix=()=>pos&&Date.now()-pos.t<90000?{lat:pos.lat,lon:pos.lon,acc:pos.acc}:null;
+
+// ---- plan math: total stops spread evenly from start to return time (breaks included) ----
+function retMs(){
+  const d=new Date(S.start||Date.now());d.setHours(0,0,0,0);
+  let t=d.getTime()+S.ret*60000;
+  if(t<=S.start)t+=864e5;
+  return t;
+}
+function calc(now){
+  let o=0,i=0,po=0,pi=0;S.res.forEach(r=>{if(r.dir==='out'){o+=r.n;po+=r.p||0}else{i+=r.n;pi+=r.p||0}});
+  const eff=Math.max(0,S.total-o+i),pkEff=Math.max(0,S.pk-po+pi),win=Math.max(1,retMs()-S.start);
+  const el=Math.min(Math.max(now-S.start,0),win);
+  const exp=Math.floor(eff*el/win),done=S.stops.length,left=eff-done;
+  const hrs=(retMs()-now)/36e5;
+  return{eff,pkEff,exp,done,delta:done-exp,left,need:hrs>0?left/hrs:null};
+}
+const brkMs=n=>S.brk.reduce((a,b)=>a+((b.e||n)-b.s),0);
+
+// ---- feedback ----
+let ac;function beep(f,ms){try{ac=ac||new AudioContext();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=f||1200;g.gain.value=.08;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+(ms||70)/1000)}catch(e){}}
+let wl;async function wake(){try{wl=await navigator.wakeLock.request('screen')}catch(e){}}
+const live=()=>S.ph!=='setup'&&S.ph!=='finished';
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&live())wake();fill()});
+
+// ---- screens ----
+function render(){
+  const a=$('#app');let h='';
+  if(S.ph==='setup'){
+    h=`<h1>New route</h1>
+    <label>Route number<input id="rt" inputmode="numeric" value="${S.route}"></label>
+    <label>Total stops<input id="tt" type="number" inputmode="numeric" value="${S.total}"></label>
+    <label>Total packages<input id="pk" type="number" inputmode="numeric" value="${S.pk}"></label>
+    <label>Return time<input id="rtm" type="time" value="${mins(S.ret)}"></label>
+    <button class="go s" data-a="start">Start route</button>
+    <button class="lnk" data-a="hist">History and export</button>`;
+  }else if(S.ph==='run'){
+    h=`<header><span id="clk"></span><span id="gps"></span><button class="lnk" data-a="edit">Edit · return <b id="rtl"></b></button></header>
+    <div class="big" id="cnt"></div><div class="chip" id="delta"></div><div class="mute" id="sub"></div><div class="mute" id="pkl"></div>
+    <button class="go" data-a="log" data-l="1">LOG STOP<span class="sm">1 location</span></button>
+    <div class="mute">More locations at this stop</div>
+    <div class="row3"><button class="lg" data-a="log" data-l="2">2</button><button class="lg" data-a="log" data-l="3">3</button><button class="lg" data-a="log" data-l="3+">3+</button></div>
+    <div class="row3"><button data-a="brk">Break</button><button data-a="resq">Rescue</button><button data-a="undo">Undo</button></div>`;
+  }else if(S.ph==='break'){
+    h=`<h1>On break</h1><div class="big" id="bt"></div><div class="mute" id="bsum"></div>
+    <button class="go" data-a="endbrk">End break</button>`;
+  }else if(S.ph==='complete'){
+    h=`<h1>Route done</h1><div class="big" id="cnt"></div><div class="mute">Finished at ${hm(S.doneAt)}</div>
+    <button class="go" data-a="toret">Return to station</button>
+    <div class="row"><button data-a="resq">Rescue</button><button data-a="undo">Undo last stop</button></div>`;
+  }else if(S.ph==='returning'){
+    h=`<h1>Returning</h1><div class="big" id="rtmr"></div><div class="mute">Drive back and debrief</div>
+    <button class="go" data-a="finish">Finish the day</button>`;
+  }else{
+    const c=calc(S.endAt),lc={};
+    S.stops.forEach(s=>{lc[s.loc]=(lc[s.loc]||0)+1});
+    const ls=['1','2','3','3+'].filter(k=>lc[k]).map(k=>lc[k]+'×'+k).join('  ')||'-';
+    h=`<h1>Route ${S.route} finished</h1><div class="sum">
+    <div><span>Stops</span><span>${c.done} / ${c.eff}</span></div>
+    <div><span>Locations per stop</span><span>${ls}</span></div>
+    <div><span>Packages</span><span>${c.pkEff}</span></div>
+    <div><span>Started</span><span>${hm(S.start)}</span></div>
+    <div><span>Stops done</span><span>${S.doneAt?hm(S.doneAt):'not completed'}</span></div>
+    <div><span>Drive back + debrief</span><span>${S.retAt?mmss(S.endAt-S.retAt):'-'}</span></div>
+    <div><span>Breaks</span><span>${Math.round(brkMs(S.endAt)/60000)} min</span></div>
+    <div><span>Day ended</span><span>${hm(S.endAt)}</span></div></div>
+    <button class="go s" data-a="newr">New route</button>
+    <button class="lnk" data-a="hist">History and export</button>`;
+  }
+  a.innerHTML=h;fill();
+}
+function fill(){
+  const n=Date.now(),g=id=>document.getElementById(id);
+  const set=(id,t)=>{const e=g(id);if(e&&e.textContent!==t)e.textContent=t};
+  if(!live())return;
+  const c=calc(n);
+  set('clk',hm(n));set('rtl',mins(S.ret));set('cnt',c.done+' / '+c.eff);
+  set('gps',fix()?'GPS ok':'GPS waiting');set('pkl',c.pkEff+' packages');
+  const d=g('delta');
+  if(d){
+    let t,k;
+    if(c.done>c.eff){t='+'+(c.done-c.eff)+' extra';k='ok'}
+    else if(c.delta>0){t='+'+c.delta+' ahead';k='ok'}
+    else if(c.delta<0){t=(-c.delta)+' behind';k='bad'}
+    else{t='on plan';k=''}
+    set('delta',t);d.className='chip '+k;
+  }
+  set('sub',c.left>0&&c.need!==null?`expected ${c.exp} · need ${c.need.toFixed(1)}/hr`:c.left>0?'past return time':'');
+  if(S.brk.length){set('bt',mmss(n-S.brk[S.brk.length-1].s));set('bsum','Breaks today '+Math.round(brkMs(n)/60000)+' min')}
+  set('rtmr',mmss(n-S.retAt));
+}
+
+// ---- dialogs ----
+function dlg(html,ok,label){
+  const d=$('#dlg');
+  d.innerHTML=html+`<div class="row"><button data-x="c">Close</button>${ok?`<button class="go s" data-x="ok">${label||'Save'}</button>`:''}</div>`;
+  d.querySelector('[data-x=c]').onclick=()=>d.close();
+  const b=d.querySelector('[data-x=ok]');if(b)b.onclick=()=>{ok(d);d.close()};
+  d.showModal();
+}
+function hist_dlg(){
+  const H=hist();
+  const rows=H.length?H.slice().reverse().map(h=>`<div><span>Route ${h.route} · ${new Date(h.start).toLocaleDateString()}</span><span>${h.stops.length} / ${h.eff}</span></div>`).join(''):'<div><span>No finished routes yet</span><span></span></div>';
+  dlg(`<h1>History</h1><div class="sum">${rows}</div>`,H.length?exportCsv:null,'Export CSV');
+}
+async function exportCsv(){
+  const r=[['route','event','n','pkgs','locations','time','lat','lon','acc']],iso=t=>new Date(t).toISOString();
+  const g=o=>o&&o.lat!=null?[o.lat,o.lon,o.acc]:['','',''];
+  hist().forEach(h=>{
+    r.push([h.route,'start',h.total,h.pk==null?'':h.pk,'',iso(h.start),...g(h.g)]);
+    h.stops.map(norm).forEach((s,i)=>r.push([h.route,'stop',i+1,'',s.loc,iso(s.t),...g(s.g)]));
+    h.brk.forEach(b=>{r.push([h.route,'break_start','','','',iso(b.s),...g(b.g)]);r.push([h.route,'break_end','','','',iso(b.e),...g(b.ge)])});
+    h.res.forEach(x=>r.push([h.route,'rescue_'+x.dir,x.n,x.p||0,'',iso(x.t),...g(x.g)]));
+    if(h.doneAt)r.push([h.route,'route_done','','','',iso(h.doneAt),'','','']);
+    if(h.retAt)r.push([h.route,'return_start','','','',iso(h.retAt),'','','']);
+    r.push([h.route,'day_end','','','',iso(h.endAt),'','','']);
+  });
+  const blob=new Blob([r.map(x=>x.join(',')).join('\n')],{type:'text/csv'});
+  const f=new File([blob],'pace-'+new Date().toISOString().slice(0,10)+'.csv',{type:'text/csv'});
+  if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f]})}catch(e){}return}
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=f.name;a.click();
+}
+
+// ---- actions ----
+function act(a,el){
+  const n=Date.now();
+  if(a==='start'){
+    const rt=$('#rt').value.trim(),tt=+$('#tt').value,pk=+$('#pk').value||0;
+    if(!rt||!tt){dlg('<h1>Missing info</h1><div class="mute">Enter a route number and total stops.</div>');return}
+    Object.assign(S,def(),{route:rt,total:tt,pk:pk,ret:toMin($('#rtm').value),start:n,g:fix(),ph:'run'});
+    geo();wake();beep(2200,200);
+  }else if(a==='log'){
+    S.stops.push({t:n,loc:(el&&el.dataset.l)||'1',g:fix()});const c=calc(n);
+    if(c.done>=c.eff){S.ph='complete';S.doneAt=n;beep(2600,400)}else beep(2000,60);
+  }else if(a==='undo'){
+    if(!S.stops.length||!confirm('Undo last stop?'))return;
+    S.stops.pop();S.ph='run';S.doneAt=0;beep(900,80);
+    const c=calc(n);if(c.done>=c.eff){S.ph='complete';S.doneAt=n}
+  }else if(a==='brk'){S.brk.push({s:n,e:0,g:fix(),ge:null});S.ph='break';beep(1000,80)}
+  else if(a==='endbrk'){const b=S.brk[S.brk.length-1];b.e=n;b.ge=fix();S.ph='run';beep(1600,80)}
+  else if(a==='toret'){S.ph='returning';S.retAt=n;beep(1400,80)}
+  else if(a==='finish'){
+    S.ph='finished';S.endAt=n;
+    const H=hist();H.push({route:S.route,start:S.start,g:S.g,total:S.total,pk:S.pk,eff:calc(n).eff,pkEff:calc(n).pkEff,stops:S.stops,brk:S.brk,res:S.res,doneAt:S.doneAt,retAt:S.retAt,endAt:n});
+    try{localStorage.setItem(HK,JSON.stringify(H))}catch(e){}
+    beep(1800,150);
+  }else if(a==='newr'){const t=S.total,k=S.pk,r=S.ret;S=Object.assign(def(),{total:t,pk:k,ret:r})}
+  else if(a==='hist'){hist_dlg();return}
+  else if(a==='edit'){
+    dlg(`<h1>Edit route</h1>
+    <label>Total stops<input id="et" type="number" inputmode="numeric" value="${S.total}"></label>
+    <label>Total packages<input id="ep" type="number" inputmode="numeric" value="${S.pk}"></label>
+    <label>Return time<input id="er" type="time" value="${mins(S.ret)}"></label>
+    <button class="red" data-x="d">RESTART ROUTE</button>`,d=>{
+      S.total=+d.querySelector('#et').value||S.total;S.pk=+d.querySelector('#ep').value||0;S.ret=toMin(d.querySelector('#er').value);save();fill()});
+    $('#dlg [data-x=d]').onclick=()=>{
+      if(!confirm('Restart this route? This erases '+S.stops.length+' stops, breaks and rescues.'))return;
+      if(!confirm('Last check: erase everything and go back to setup?'))return;
+      S=Object.assign(def(),{route:S.route,total:S.total,pk:S.pk,ret:S.ret});save();$('#dlg').close();render();
+    };
+    return;
+  }else if(a==='resq'){
+    dlg(`<h1>Rescue</h1>
+    <label>Direction<select id="rd"><option value="out">I got rescued (stops removed)</option><option value="in">I rescued (stops added)</option></select></label>
+    <label>Stops<input id="rn" type="number" inputmode="numeric" value="1"></label>
+    <label>Packages<input id="rp" type="number" inputmode="numeric" value="0"></label>`,d=>{
+      const k=+d.querySelector('#rn').value;if(!k)return;
+      S.res.push({dir:d.querySelector('#rd').value,n:k,p:+d.querySelector('#rp').value||0,t:Date.now(),g:fix()});
+      const c=calc(Date.now());
+      if(c.done>=c.eff&&S.ph==='run'){S.ph='complete';S.doneAt=Date.now()}
+      else if(c.done<c.eff&&S.ph==='complete'){S.ph='run';S.doneAt=0}
+      save();render()});
+    return;
+  }
+  save();render();
+}
+document.addEventListener('click',e=>{const b=e.target.closest('#app [data-a]');if(b)act(b.dataset.a,b)});
+
+render();
+if(live()){wake();geo()}
+setInterval(fill,1000);
+</script>
+</body>
+</html>
