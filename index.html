@@ -61,12 +61,15 @@ const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
 const hist=()=>{try{return JSON.parse(localStorage.getItem(HK))||[]}catch(e){return[]}};
 
 // ---- GPS: keep a live fix, stamp it on every event ----
-let pos=null,gw=null;
+let pos=null,gw=null,gerr='';
 function geo(){
-  if(!navigator.geolocation||gw!==null)return;
+  if(!navigator.geolocation){gerr='unsupported';return}
+  if(gw!==null)return;
   gw=navigator.geolocation.watchPosition(
-    p=>{pos={lat:+p.coords.latitude.toFixed(6),lon:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy),t:Date.now()}},
-    ()=>{pos=null},{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+    p=>{gerr='';pos={lat:+p.coords.latitude.toFixed(6),lon:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy),t:Date.now()}},
+    e=>{pos=null;gerr=e.code===1?'denied':e.code===2?'unavailable':'timeout';
+        if(e.code===1){navigator.geolocation.clearWatch(gw);gw=null}},
+    {enableHighAccuracy:true,maximumAge:5000,timeout:20000});
 }
 const fix=()=>pos&&Date.now()-pos.t<90000?{lat:pos.lat,lon:pos.lon,acc:pos.acc}:null;
 
@@ -145,7 +148,7 @@ function fill(){
   if(!live())return;
   const c=calc(n);
   set('clk',hm(n));set('rtl',mins(S.ret));set('cnt',c.done+' / '+c.eff);
-  set('gps',fix()?'GPS ok':'GPS waiting');set('pkl',c.pkEff+' packages');
+  set('gps',fix()?'GPS ok':gerr?'GPS '+gerr+' (tap)':'GPS waiting');set('pkl',c.pkEff+' packages');
   const d=g('delta');
   if(d){
     let t,k;
@@ -245,6 +248,7 @@ function act(a,el){
   save();render();
 }
 document.addEventListener('click',e=>{const b=e.target.closest('#app [data-a]');if(b)act(b.dataset.a,b)});
+document.addEventListener('click',e=>{if(e.target.id==='gps')geo()});
 
 render();
 if(live()){wake();geo()}
